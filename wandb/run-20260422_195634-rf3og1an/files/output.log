@@ -1,0 +1,5 @@
+Epoch 1/5 | Train Acc: 14.8% | Val Acc: 17.7%
+Epoch 2/5 | Train Acc: 21.7% | Val Acc: 15.8%
+Epoch 3/5 | Train Acc: 25.7% | Val Acc: 16.3%
+Epoch 4/5 | Train Acc: 29.6% | Val Acc: 25.1%
+Epoch 5/5 | Train Acc: 33.5% | Val Acc: 32.0%

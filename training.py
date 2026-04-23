@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 from torch.utils.data import DataLoader, random_split
 
 from dataset import DEFAULT_NUM_FRAMES, INPUT_CHANNELS, KarateDataset, NTU_INTERACTION_CLASS_NAMES
@@ -45,6 +46,9 @@ def train_model():
     p.add_argument("--no-interaction", action="store_true", help="Disable cross-person interaction edges")
     p.add_argument("--num-frames", type=int, default=None, metavar="T",
                    help=f"Target time steps after pad/resample (default: {DEFAULT_NUM_FRAMES})")
+    p.add_argument("--wandb-project", default="nturgb-interaction", help="W&B project name")
+    p.add_argument("--wandb-entity", default=None, help="W&B entity (username or team); defaults to your default entity")
+    p.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging")
     args = p.parse_args()
 
     DATA_DIR = os.path.abspath(args.data_dir)
@@ -57,6 +61,8 @@ def train_model():
     save_dir = os.path.join(_SCRIPT_DIR, "output", f"{timestamp}_training")
     os.makedirs(save_dir, exist_ok=True)
     print(f"Device: {device} | Saving to: {save_dir}")
+
+    use_wandb = not args.no_wandb
 
     full_dataset = KarateDataset(DATA_DIR, class_names=CLASSES, mode="train", num_frames=args.num_frames)
     if len(full_dataset) == 0:
@@ -82,6 +88,24 @@ def train_model():
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0005)
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50, 120], gamma=0.1)
+
+    if use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=timestamp,
+            config={
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "lr": args.lr,
+                "val_ratio": args.val_ratio,
+                "seed": args.seed,
+                "num_frames": full_dataset.num_frames,
+                "use_interaction": USE_INTERACTION,
+                "num_classes": len(CLASSES),
+                "in_channels": in_ch,
+            },
+        )
 
     with open(os.path.join(save_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({
@@ -133,6 +157,14 @@ def train_model():
         csv_writer.writerow([epoch + 1, f"{train_loss_avg:.6f}", f"{train_acc:.4f}", f"{val_loss_avg:.6f}", f"{val_acc:.4f}"])
         csv_file.flush()
         print(f"Epoch {epoch+1}/{args.epochs} | Train Acc: {train_acc:.1f}% | Val Acc: {val_acc:.1f}%")
+        if use_wandb:
+            wandb.log({
+                "train/loss": train_loss_avg,
+                "train/acc": train_acc,
+                "val/loss": val_loss_avg,
+                "val/acc": val_acc,
+                "lr": optimizer.param_groups[0]["lr"],
+            }, step=epoch + 1)
         if val_acc > best_acc:
             best_acc = val_acc
             torch.save(model.state_dict(), os.path.join(save_dir, "best_model.pth"))
@@ -140,6 +172,15 @@ def train_model():
 
     csv_file.close()
     _save_history_plots(history, save_dir)
+    if use_wandb:
+        wandb.log({
+            "charts/loss": wandb.Image(os.path.join(save_dir, "loss_graph.png")),
+            "charts/accuracy": wandb.Image(os.path.join(save_dir, "accuracy_graph.png")),
+        })
+        artifact = wandb.Artifact("best-model", type="model")
+        artifact.add_file(os.path.join(save_dir, "best_model.pth"))
+        wandb.log_artifact(artifact)
+        wandb.finish()
     print("Training Complete.")
 
 

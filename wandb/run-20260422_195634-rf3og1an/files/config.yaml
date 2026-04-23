@@ -1,0 +1,75 @@
+_wandb:
+    value:
+        cli_version: 0.26.0
+        e:
+            lijl9w2rec9zsu509tctiankcs5j8xia:
+                args:
+                    - --epochs
+                    - "5"
+                codePath: training.py
+                codePathLocal: training.py
+                cpu_count: 6
+                cpu_count_logical: 12
+                cudaVersion: "13.1"
+                disk:
+                    /:
+                        total: "1999462420480"
+                        used: "1340532346880"
+                email: s2530214@u.tsukuba.ac.jp
+                executable: C:\Users\_s2111724\AppData\Local\miniconda3\envs\GNN\python.exe
+                git:
+                    commit: cdcfbea88d51d9318e9a3389facd7e318a5245e3
+                    remote: https://github.com/imageleona/nturgb_interaction
+                gpu: NVIDIA GeForce RTX 4080 SUPER
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 10240
+                      memoryTotal: "17171480576"
+                      name: NVIDIA GeForce RTX 4080 SUPER
+                      uuid: GPU-57ecc445-ee31-335a-ad76-cd8269854428
+                host: DESKTOP-6CMHDHF
+                memory:
+                    total: "34276970496"
+                os: Windows-10-10.0.26200-SP0
+                program: C:\Users\_s2111724\Documents\nturgb_interaction\training.py
+                python: CPython 3.10.19
+                root: C:\Users\_s2111724\Documents\nturgb_interaction
+                startedAt: "2026-04-22T10:56:34.968560Z"
+                writerId: lijl9w2rec9zsu509tctiankcs5j8xia
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 13
+                - 16
+                - 61
+            "4": 3.10.19
+            "5": 0.26.0
+            "8":
+                - 3
+            "12": 0.26.0
+            "13": windows-amd64
+batch_size:
+    value: 64
+epochs:
+    value: 5
+in_channels:
+    value: 2
+lr:
+    value: 0.001
+num_classes:
+    value: 26
+num_frames:
+    value: 150
+seed:
+    value: 42
+use_interaction:
+    value: true
+val_ratio:
+    value: 0.2

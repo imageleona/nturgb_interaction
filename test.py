@@ -6,6 +6,7 @@ from typing import Optional
 
 import torch
 import numpy as np
+import wandb
 from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix, classification_report
 import matplotlib.pyplot as plt
@@ -110,6 +111,9 @@ def test_model():
         default=_DEFAULT_DATA_DIR,
         help="Root folder with *test.json",
     )
+    p.add_argument("--wandb-project", default="nturgb-interaction", help="W&B project name")
+    p.add_argument("--wandb-entity", default=None, help="W&B entity (username or team); defaults to your default entity")
+    p.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging")
     args = p.parse_args()
 
     TRAIN_OUTPUT_FOLDER = args.output_dir
@@ -157,6 +161,16 @@ def test_model():
         cfg = json.load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_wandb = not args.no_wandb
+
+    if use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=f"{ts}_test",
+            job_type="test",
+            config={**cfg, "checkpoint_dir": TRAIN_OUTPUT_FOLDER},
+        )
 
     test_dataset = KarateDataset(DATA_DIR, class_names=cfg["classes"], mode="test")
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -182,6 +196,9 @@ def test_model():
     report = classification_report(
         all_labels, all_preds, target_names=cfg["classes"], digits=4
     )
+    report_dict = classification_report(
+        all_labels, all_preds, target_names=cfg["classes"], output_dict=True
+    )
     print("\n" + "=" * 30 + "\nTEST RESULTS\n" + "=" * 30)
     print(report)
 
@@ -201,6 +218,22 @@ def test_model():
         save_path=os.path.join(test_save_dir, "test_cm.png"),
         txt_path=os.path.join(test_save_dir, "test_cm.txt"),
     )
+
+    if use_wandb:
+        per_class = {
+            f"test/per_class/{cls}/f1": report_dict[cls]["f1-score"]
+            for cls in cfg["classes"]
+            if cls in report_dict
+        }
+        wandb.log({
+            "test/accuracy": report_dict["accuracy"],
+            "test/macro_f1": report_dict["macro avg"]["f1-score"],
+            "test/weighted_f1": report_dict["weighted avg"]["f1-score"],
+            "test/confusion_matrix": wandb.Image(os.path.join(test_save_dir, "test_cm.png")),
+            **per_class,
+        })
+        wandb.finish()
+
     print(f"Results saved to {test_save_dir}")
 
 
