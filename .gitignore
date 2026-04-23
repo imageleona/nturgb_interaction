@@ -3,3 +3,4 @@ output/
 npy_output/
 skeleton_per_class/
 ntu_rgb120_missings.txt
+wandb/
