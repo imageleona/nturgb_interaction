@@ -4,3 +4,6 @@ npy_output/
 skeleton_per_class/
 ntu_rgb120_missings.txt
 wandb/
+json_subsets/
+nturgb-interaction.xlsx
+train_numerous.ps1
