@@ -54,7 +54,7 @@ def train_model():
     DATA_DIR = os.path.abspath(args.data_dir)
     print(f"Dataset directory: {DATA_DIR}")
     CLASSES = list(NTU_INTERACTION_CLASS_NAMES)
-    USE_INTERACTION = not args.no_interaction
+    interaction_mode = "none" if args.no_interaction else "full"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -83,7 +83,7 @@ def train_model():
 
     model = STGCN(
         num_classes=len(CLASSES), in_channels=in_ch, num_nodes=50,
-        use_interaction=USE_INTERACTION,
+        interaction_mode=interaction_mode,
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0005)
     criterion = nn.CrossEntropyLoss()
@@ -101,7 +101,7 @@ def train_model():
                 "val_ratio": args.val_ratio,
                 "seed": args.seed,
                 "num_frames": full_dataset.num_frames,
-                "use_interaction": USE_INTERACTION,
+                "interaction_mode": interaction_mode,
                 "num_classes": len(CLASSES),
                 "in_channels": in_ch,
             },
@@ -111,7 +111,7 @@ def train_model():
         json.dump({
             "in_channels": in_ch,
             "num_nodes": 50,
-            "use_interaction": USE_INTERACTION,
+            "interaction_mode": interaction_mode,
             "classes": CLASSES,
             "num_frames": full_dataset.num_frames,
         }, f, indent=2)

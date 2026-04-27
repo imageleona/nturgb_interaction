@@ -11,38 +11,38 @@ class Graph:
     def __init__(self, num_nodes, strategy="spatial", interaction_mode="full"):
         """
         interaction_mode:
-          - "none": two independent skeletons only
-          - "full": every P1 joint <-> every P2 joint
-          - "hand_cross": each wrist linked to all joints on the other person (both directions)
+          - "none":       two independent skeletons only
+          - "full":       every P1 joint <-> every P2 joint (dense; 625 cross edges)
+          - "hand_cross": each wrist linked to all joints on the other person (both
+                          directions) — better for combat sports, cheaper adjacency
         """
         self.num_nodes = num_nodes
         self.strategy = strategy
         self.interaction_mode = interaction_mode
 
         self.nodes_per_person = 25  # NTU-25
-        self.center = 0   # Base of spine
+        self.center = 0             # Base of spine
 
         self.edges = self.get_edges()
         self.A = self.get_adjacency_matrix()
 
     def get_edges(self):
         """NTU-25 physical edges + optional cross-person edges."""
-        # 25 nodes (0-24)
         p1_edges = [
-            (0, 1), (1, 20), (20, 2), (2, 3),          # Spine + head
-            (20, 4), (4, 5), (5, 6), (6, 7),            # Left arm
-            (7, 21), (7, 22),                           # Left hand tip + thumb
-            (20, 8), (8, 9), (9, 10), (10, 11),         # Right arm
-            (11, 23), (11, 24),                         # Right hand tip + thumb
-            (0, 12), (12, 13), (13, 14), (14, 15),      # Left leg
-            (0, 16), (16, 17), (17, 18), (18, 19),      # Right leg
+            (0, 1), (1, 20), (20, 2), (2, 3),         # Spine + head
+            (20, 4), (4, 5), (5, 6), (6, 7),           # Left arm
+            (7, 21), (7, 22),                          # Left hand tip + thumb
+            (20, 8), (8, 9), (9, 10), (10, 11),        # Right arm
+            (11, 23), (11, 24),                        # Right hand tip + thumb
+            (0, 12), (12, 13), (13, 14), (14, 15),     # Left leg
+            (0, 16), (16, 17), (17, 18), (18, 19),     # Right leg
         ]
 
         if self.num_nodes == self.nodes_per_person:
             return p1_edges
 
-        # P2 edges (25-49)
-        p2_edges = [(u + self.nodes_per_person, v + self.nodes_per_person) for u, v in p1_edges]
+        p2_edges = [(u + self.nodes_per_person, v + self.nodes_per_person)
+                    for u, v in p1_edges]
         all_edges = p1_edges + p2_edges
 
         p2_off = self.nodes_per_person
@@ -51,6 +51,7 @@ class Graph:
                 for j in range(self.nodes_per_person):
                     all_edges.append((i, j + p2_off))
         elif self.interaction_mode == "hand_cross":
+            # Only wrists cross the person boundary — more principled for karate
             for hi in _HAND_JOINT_INDICES:
                 for j in range(self.nodes_per_person):
                     all_edges.append((hi, j + p2_off))
@@ -98,12 +99,14 @@ class Graph:
             row_sums = A[p].sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1.0
             A[p] = A[p] / row_sums
+
         return torch.FloatTensor(A)
+
 
 class GraphConv(nn.Module):
     def __init__(self, in_channels, out_channels, A):
         super().__init__()
-        self.num_subsets = A.size(0) 
+        self.num_subsets = A.size(0)
         self.conv = nn.Conv2d(in_channels, out_channels * self.num_subsets, kernel_size=1)
         self.register_buffer('A', A)
         self.edge_importance = nn.Parameter(torch.ones(self.A.size()))
@@ -116,8 +119,9 @@ class GraphConv(nn.Module):
         x = torch.einsum('nkctv,kvw->nctw', x, adj)
         return x
 
+
 class STGCNBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, A, stride=1):
+    def __init__(self, in_channels, out_channels, A, stride=1, dropout=0.5):
         super().__init__()
         self.gcn = GraphConv(in_channels, out_channels, A)
         self.tcn = nn.Sequential(
@@ -125,7 +129,8 @@ class STGCNBlock(nn.Module):
             nn.ReLU(),
             nn.Conv2d(out_channels, out_channels, (9, 1), (stride, 1), padding=(4, 0)),
             nn.BatchNorm2d(out_channels),
-            nn.Dropout(0.6, inplace=True),
+            # Dropout AFTER the full TCN BN, not sandwiched between BNs
+            nn.Dropout(dropout),
         )
         if in_channels != out_channels or stride != 1:
             self.residual = nn.Sequential(
@@ -133,7 +138,7 @@ class STGCNBlock(nn.Module):
                 nn.BatchNorm2d(out_channels),
             )
         else:
-            self.residual = lambda x: x
+            self.residual = nn.Identity()
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -142,29 +147,82 @@ class STGCNBlock(nn.Module):
         x = self.tcn(x)
         return self.relu(x + res)
 
+
 class STGCN(nn.Module):
-    def __init__(self, num_classes, in_channels, num_nodes, interaction_mode="full", use_interaction=None):
+    """
+    9-layer ST-GCN following the channel progression of the original paper:
+        64  x3  (layers 1-3)   — low-level spatial feature extraction
+        128 x3  (layers 4-6)   — mid-level motion patterns; stride=2 at layer 4
+        256 x3  (layers 7-9)   — high-level temporal composition; stride=2 at layer 7
+
+    This gives two temporal downsampling steps, expanding the effective temporal
+    receptive field to cover longer action sequences.
+
+    Args
+    ----
+    num_classes       : number of action classes
+    in_channels       : input feature channels (typically 2 for x,y or 3 for x,y,conf)
+    num_nodes         : total graph nodes (50 for two-person NTU-25)
+    interaction_mode  : "full" (default) | "hand_cross" | "none"
+    dropout           : dropout probability applied inside each TCN block
+    """
+
+    def __init__(
+        self,
+        num_classes,
+        in_channels,
+        num_nodes,
+        interaction_mode="full",
+        dropout=0.5,
+    ):
         super().__init__()
-        if use_interaction is not None:
-            interaction_mode = "full" if use_interaction else "none"
+
         graph = Graph(num_nodes, interaction_mode=interaction_mode)
-        A = graph.A 
+        A = graph.A  # (3, V, V)
+
         self.data_bn = nn.BatchNorm1d(in_channels * num_nodes)
-        self.layer1 = STGCNBlock(in_channels, 64, A)
-        self.layer2 = STGCNBlock(64, 64, A)
-        self.layer3 = STGCNBlock(64, 128, A, stride=2)
-        self.layer4 = STGCNBlock(128, 128, A)
-        self.fcn = nn.Conv2d(128, num_classes, kernel_size=1)
+
+        # 64-channel stage 
+        self.layer1 = STGCNBlock(in_channels, 64, A, dropout=dropout)
+        self.layer2 = STGCNBlock(64,          64, A, dropout=dropout)
+        self.layer3 = STGCNBlock(64,          64, A, dropout=dropout)
+
+        # 128-channel stage  (stride=2 on layer 4) 
+        self.layer4 = STGCNBlock(64,  128, A, stride=2, dropout=dropout)
+        self.layer5 = STGCNBlock(128, 128, A, dropout=dropout)
+        self.layer6 = STGCNBlock(128, 128, A, dropout=dropout)
+
+        # 256-channel stage  (stride=2 on layer 7) 
+        self.layer7 = STGCNBlock(128, 256, A, stride=2, dropout=dropout)
+        self.layer8 = STGCNBlock(256, 256, A, dropout=dropout)
+        self.layer9 = STGCNBlock(256, 256, A, dropout=dropout)
+
+        # Output head 
+        self.fc = nn.Linear(256, num_classes)
 
     def forward(self, x):
+        """
+        x : (N, C, T, V)
+        returns logits : (N, num_classes)
+        """
         N, C, T, V = x.size()
+
+        # Input batch norm over the joint/channel dimension
         x = x.permute(0, 1, 3, 2).contiguous().view(N, C * V, T)
         x = self.data_bn(x)
         x = x.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()
+
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        x = nn.functional.avg_pool2d(x, x.size()[2:])
-        x = self.fcn(x)
-        return x.view(x.size(0), -1)
+        x = self.layer5(x)
+        x = self.layer6(x)
+        x = self.layer7(x)
+        x = self.layer8(x)
+        x = self.layer9(x)
+
+        # Global average pooling over (T, V) → (N, 256)
+        x = x.mean(dim=[2, 3])
+
+        return self.fc(x)
