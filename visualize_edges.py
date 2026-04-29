@@ -4,7 +4,7 @@
 """
 Visualize learned edge importance weights from a trained ST-GCN model.
 
-For each of the 4 ST-GCN layers produces:
+For each of the 9 ST-GCN layers produces:
   - Left panel  : skeleton drawing with edges colored by within-person importance
   - Right panel : 25x25 heatmap of cross-person edge importance (P1 joints x P2 joints)
 
@@ -117,7 +117,7 @@ def visualize(output_dir: str, save_path: str):
     with open(config_path, "r") as f:
         cfg = json.load(f)
 
-    interaction_mode = "full" if cfg.get("use_interaction", True) else "none"
+    interaction_mode = cfg.get("interaction_mode", "full")
     model = STGCN(
         num_classes=len(cfg["classes"]),
         in_channels=cfg["in_channels"],
@@ -128,8 +128,23 @@ def visualize(output_dir: str, save_path: str):
     model.load_state_dict(state)
     model.eval()
 
-    layers = [model.layer1.gcn, model.layer2.gcn, model.layer3.gcn, model.layer4.gcn]
-    layer_names = ["Layer 1 (2→64)", "Layer 2 (64→64)", "Layer 3 (64→128, stride 2)", "Layer 4 (128→128)"]
+    in_ch = cfg["in_channels"]
+    layers = [
+        model.layer1.gcn, model.layer2.gcn, model.layer3.gcn,
+        model.layer4.gcn, model.layer5.gcn, model.layer6.gcn,
+        model.layer7.gcn, model.layer8.gcn, model.layer9.gcn,
+    ]
+    layer_names = [
+        f"Layer 1 ({in_ch}→64)",
+        "Layer 2 (64→64)",
+        "Layer 3 (64→64)",
+        "Layer 4 (64→128, stride 2)",
+        "Layer 5 (128→128)",
+        "Layer 6 (128→128)",
+        "Layer 7 (128→256, stride 2)",
+        "Layer 8 (256→256)",
+        "Layer 9 (256→256)",
+    ]
 
     cmap = cm.get_cmap("YlOrRd")
 
@@ -137,7 +152,7 @@ def visualize(output_dir: str, save_path: str):
     p1_offset = np.array([-1.6, 0.0])
     p2_offset = np.array([ 1.6, 0.0])
 
-    fig, axes = plt.subplots(4, 2, figsize=(14, 22))
+    fig, axes = plt.subplots(9, 2, figsize=(14, 46))
     fig.suptitle("Learned Edge Importance per ST-GCN Layer", fontsize=13, y=0.995)
 
     for row, (gcn, lname) in enumerate(zip(layers, layer_names)):
